@@ -1,0 +1,11 @@
+thinkenv/
+.env
+
+__pycache__/
+*.pyc
+
+uploaded_docs/
+
+.streamlit/
+
+.vscode/
