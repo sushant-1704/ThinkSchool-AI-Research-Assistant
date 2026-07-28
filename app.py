@@ -1,4 +1,5 @@
 import os
+import hashlib
 import streamlit as st
 
 from backend import create_vector_db, ask_question
@@ -18,14 +19,14 @@ st.set_page_config(
 # Session State
 # --------------------------------------------------
 
-if "vector_db" not in st.session_state:
-    st.session_state.vector_db = None
-
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-if "processed_file" not in st.session_state:
-    st.session_state.processed_file = None
+if "vector_db" not in st.session_state:
+    st.session_state.vector_db = None
+
+if "file_hash" not in st.session_state:
+    st.session_state.file_hash = None
 
 # --------------------------------------------------
 # Header
@@ -34,7 +35,7 @@ if "processed_file" not in st.session_state:
 st.title("📚 Think School AI Research Assistant")
 
 st.caption(
-    "AI-powered Research Assistant for Business Reports, Annual Reports & Case Studies"
+    "Analyze Annual Reports, DRHPs and Business Documents using Retrieval-Augmented Generation (RAG)."
 )
 
 st.divider()
@@ -49,23 +50,29 @@ with st.sidebar:
 
     uploaded_file = st.file_uploader(
         "Choose a PDF",
-        type="pdf"
+        type=["pdf"]
     )
 
     if uploaded_file is not None:
 
         os.makedirs("uploaded_docs", exist_ok=True)
 
+        file_bytes = uploaded_file.getvalue()
+
+        current_hash = hashlib.md5(file_bytes).hexdigest()
+
         pdf_path = os.path.join(
             "uploaded_docs",
-            uploaded_file.name
+            f"{current_hash}.pdf"
         )
 
-        # Process only once
-        if st.session_state.processed_file != uploaded_file.name:
+        if (
+            st.session_state.vector_db is None
+            or st.session_state.file_hash != current_hash
+        ):
 
             with open(pdf_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+                f.write(file_bytes)
 
             with st.spinner("Creating Knowledge Base..."):
 
@@ -73,23 +80,25 @@ with st.sidebar:
                     pdf_path
                 )
 
-            st.session_state.processed_file = uploaded_file.name
+            st.session_state.file_hash = current_hash
 
-            st.success("PDF Processed Successfully!")
+        st.success("✅ PDF Ready")
 
-            st.caption(f"📄 Document : {uploaded_file.name}")
+        st.caption(f"📄 {uploaded_file.name}")
 
-            st.info("""
-            💡 Suggested Questions
+        st.info(
+            """
+💡 Suggested Questions
 
-            • Summarize this company
+• Summarize this company
 
-            • Explain the business model
+• Explain the business model
 
-            • What are the biggest risks?
+• What are the biggest risks?
 
-            • What are the revenue streams?
-            """)
+• What are the revenue streams?
+"""
+        )
 
     st.divider()
 
@@ -97,11 +106,11 @@ with st.sidebar:
 
     selected_prompt = None
 
-    for tool in PROMPTS.keys():
+    for title, prompt in PROMPTS.items():
 
-        if st.button(tool, use_container_width=True):
+        if st.button(title, use_container_width=True):
 
-            selected_prompt = PROMPTS[tool]
+            selected_prompt = prompt
 
 # --------------------------------------------------
 # Display Chat History
@@ -137,63 +146,75 @@ elif user_question:
 
 if question:
 
-    if user_question:
-
-        st.session_state.messages.append(
-            {
-                "role": "user",
-                "content": user_question
-            }
-        )
-
-        with st.chat_message("user"):
-            st.markdown(user_question)
-
     if st.session_state.vector_db is None:
 
-        st.warning("Please upload a PDF first.")
+        st.warning("⚠️ Please upload a PDF first.")
 
     else:
 
-        with st.spinner("Thinking..."):
+        if user_question:
 
-            answer, sources = ask_question(
-                question,
-                st.session_state.vector_db
+            st.session_state.messages.append(
+                {
+                    "role": "user",
+                    "content": user_question
+                }
             )
 
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": answer
-            }
-        )
+            with st.chat_message("user"):
+
+                st.markdown(user_question)
 
         with st.chat_message("assistant"):
 
+            with st.spinner("Thinking..."):
+
+                try:
+
+                    answer, sources = ask_question(
+                        question,
+                        st.session_state.vector_db
+                    )
+
+                except Exception as e:
+
+                    st.error(f"Error: {e}")
+                    st.stop()
+
             st.markdown(answer)
+
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": answer
+                }
+            )
 
             if sources:
 
-                pages = []
-
-                for doc in sources:
-
-                    page = doc.metadata.get("page")
-
-                    if page is not None:
-
-                        pages.append(page + 1)
+                pages = sorted(
+                    {
+                        doc.metadata.get("page", 0) + 1
+                        for doc in sources
+                        if doc.metadata.get("page") is not None
+                    }
+                )
 
                 if pages:
-
-                    pages = sorted(set(pages))
 
                     st.divider()
 
                     st.caption("📖 Source Pages")
 
-                    st.write(", ".join([f"Page {p}" for p in pages]))
+                    st.write(
+                        ", ".join(
+                            [f"Page {page}" for page in pages]
+                        )
+                    )
+
+# --------------------------------------------------
+# Footer
+# --------------------------------------------------
 
 st.divider()
 

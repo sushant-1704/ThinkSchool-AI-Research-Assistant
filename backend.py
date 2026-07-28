@@ -6,12 +6,11 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from langchain_openai import (
-    OpenAIEmbeddings,
-    ChatOpenAI
+    ChatOpenAI,
+    OpenAIEmbeddings
 )
 
 from langchain_community.vectorstores import FAISS
-
 from langchain.chains import RetrievalQA
 
 # ----------------------------------------------------
@@ -41,12 +40,18 @@ def create_vector_db(pdf_path):
 
     documents = loader.load()
 
+    if len(documents) == 0:
+        raise ValueError("No readable text found inside the PDF.")
+
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100
+        chunk_size=1000,
+        chunk_overlap=150
     )
 
     chunks = splitter.split_documents(documents)
+
+    if len(chunks) == 0:
+        raise ValueError("No text chunks could be created.")
 
     embeddings = OpenAIEmbeddings()
 
@@ -71,11 +76,9 @@ def ask_question(question, vector_db):
         chain_type="stuff",
 
         retriever=vector_db.as_retriever(
-
             search_kwargs={
-                "k":4
+                "k": 4
             }
-
         ),
 
         return_source_documents=True
@@ -87,8 +90,8 @@ def ask_question(question, vector_db):
         }
     )
 
-    answer = result["result"]
+    answer = result.get("result", "No answer found.")
 
-    sources = result["source_documents"]
+    sources = result.get("source_documents", [])
 
     return answer, sources
